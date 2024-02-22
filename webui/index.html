@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title> ESP8266 Campainha Telegram </title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+  <div style="text-align:left;display:inline-block;width:320px;padding:5px">
+    <p id='info'>Campainha Config</p>
+    <p id='conn'></p>
+    <p id='details'>Escaneie e selecione a rede Wi-Fi
+      <button id="scan" onclick="scan_rpc()"><span id="scans"></span> Scan <b> &#x1F50D </b>
+    </p></button>
+    <p id='wl'></p>
+    <input id='s' name='n' length=32 placeholder='SSID'>
+    <br>
+    <input id='p' name='p' length=64 type='password' placeholder='password'>
+    <br>
+    <br>
+    <div class="container">
+      <div class="toggle-wrapper">
+        <label class="switch">
+          <input type="checkbox" class="hidden-toggle" />
+          <div class="slider">
+            <div class="button"></div>
+          </div>
+        </label>
+        <div class="description">
+          NOTIFICATIONS
+        </div>
+      </div>
+    </div>
+    <input style="width:auto; float:right;" type="checkbox" id="bssid" unchecked>
+    <label for="bssid" id="b">Lock to selected BSSID</label>
+    <br>
+    <br>
+    <button id="save" onclick="save_rpc()"><span id="saves">&#x1F4BE;</span> Save</button>
+    <br>
+    <br>
+    <button id="reset" title="Reset network settings" onclick="p('Reset settings and reboot in AP mode?', reset_rpc)"><span id="resets">&#x1F198;</span> Reset</button>
+    <p id='copyright'>Desenvolvido por Matheus Tagliari</p>
+    <br>
+  </div>
+  <script defer src="script.js"></script>
+</body>
+
+</html>
