@@ -9,7 +9,6 @@
 #include <WiFiUdp.h>
 #include <FS.h>
 
-
 // Define constants for EEPROM addresses
 #define SSID_ADDRESS 0
 #define SALT_ADDRESS (SSID_ADDRESS + 32)
@@ -21,8 +20,7 @@
 #define NTP_SERVER1_ADDRESS (PASSWORD_ADDRESS + 16)
 #define NTP_SERVER2_ADDRESS (NTP_SERVER1_ADDRESS + 32)
 #define FLAG_ADDRESS (NTP_SERVER2_ADDRESS + 32)
-#define PUSHBULLET_API_KEY_ADDRESS (FLAG_ADDRESS + 32)
-#define CONFIG_SSID_NAME "MyConfigNetwork"
+#define CONFIG_SSID_NAME "Campainha Config"
 #define MAGIC_NUMBER 0xDEADBEEF
 
 const int eepromSize = 512;
@@ -45,8 +43,6 @@ FileData files[] = {
   { "/styles.css", "text/css" }
 };
 
-
-
 struct Config {
   char ssid[32];
   char password[16];
@@ -56,6 +52,8 @@ struct Config {
   char guiPassword[16];
   char ntpServer1[32];
   char ntpServer2[32];
+  unsigned long updateInterval; // Added this line
+  unsigned long intervalUnit;   // Added this line
 };
 
 ESP8266WebServer server(PORT);
@@ -66,7 +64,34 @@ WiFiUDP ntpUDP;
 unsigned long updateInterval;
 unsigned long intervalUnit;
 
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 0); 
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 0);
+
+void sendMessageToTelegram(const char *message) {
+  // Read the bot token and chat ID from the EEPROM
+  char botToken[32];
+  char chatId[32];
+  EEPROM.get(BOT_TOKEN_ADDRESS, botToken);
+  EEPROM.get(CHAT_ID_ADDRESS, chatId);
+
+  // Construct the URL
+  String url = "https://api.telegram.org/bot" + String(botToken) + "/sendMessage?chat_id=" + String(chatId) + "&text=" + String(message);
+
+  // Send the request
+  WiFiClient client;
+  HTTPClient http;
+  http.begin(client, url.c_str());
+  int httpCode = http.GET();
+
+  // Check the response code
+  if (httpCode > 0) {
+    Serial.println("Message sent successfully");
+  } else {
+    Serial.println("Error sending message");
+  }
+
+  // Close the connection
+  http.end();
+}
 
 void serveFile(const char* path, const char* contentType) {
   File file = SPIFFS.open(path, "r");
@@ -88,7 +113,7 @@ void updateNtpServers(const char *ntpServer1, const char *ntpServer2) {
   // Update NTP client with new servers
   timeClient = NTPClient(ntpUDP, ntpServer1, 0, updateInterval * intervalUnit);
   timeClient.begin();
-  timeClient.forceUpdate();  // Force an immediate update
+  timeClient.forceUpdate();
 }
 
 void connectToWiFi(Config &conf) {
@@ -103,10 +128,10 @@ void connectToWiFi(Config &conf) {
   Serial.println("Connected to WiFi. IP address: " + WiFi.localIP().toString());
 }
 
-void saveConfig(Config &conf) {
-  EEPROM.put(SSID_ADDRESS, conf.ssid);
-  EEPROM.put(NTP_SERVER1_ADDRESS, conf.ntpServer1);
-  EEPROM.put(NTP_SERVER2_ADDRESS, conf.ntpServer2);
+void saveConfig(Config &config) {
+  EEPROM.put(SSID_ADDRESS, config.ssid);
+  EEPROM.put(NTP_SERVER1_ADDRESS, config.ntpServer1);
+  EEPROM.put(NTP_SERVER2_ADDRESS, config.ntpServer2);
 
   // Generate a random salt for each password
   uint8_t salt[32];
@@ -118,14 +143,14 @@ void saveConfig(Config &conf) {
   // Hash the password with SHA-256 and store the hash
   SHA256 sha256;
   sha256.update(salt, sizeof(salt));
-  sha256.update((uint8_t *)conf.password, strlen(conf.password));
+  sha256.update((uint8_t *)config.password, strlen(config.password));
   uint8_t hash[32];
   sha256.finalize(hash, sizeof(hash));
   EEPROM.put(PASSWORD_HASH_ADDRESS, hash);
 
   // Store the bot token and chat ID
-  EEPROM.put(BOT_TOKEN_ADDRESS, conf.botToken);
-  EEPROM.put(CHAT_ID_ADDRESS, conf.chatId);
+  EEPROM.put(BOT_TOKEN_ADDRESS, config.botToken);
+  EEPROM.put(CHAT_ID_ADDRESS, config.chatId);
 
   // Store the flag
   EEPROM.put(FLAG_ADDRESS, MAGIC_NUMBER);
@@ -200,75 +225,51 @@ void handleRoot() {
 }
 
 void handleSave() {
-  bool isCheckboxChecked = server.hasArg("checkBox") && server.arg("checkBox") == "on";
+   bool isCheckboxChecked = server.hasArg("checkBox") && server.arg("checkBox") == "on";
   String ssid = server.arg("ssid");
   String password = server.arg("password");
   String botToken = server.arg("botToken");
   String chatId = server.arg("chatId");
   String ntpServer1 = server.arg("ntpServer1");
   String ntpServer2 = server.arg("ntpServer2");
-  String updateNtp1 = server.arg("updateNtp1");
-  String updateNtp2 = server.arg("updateNtp2");
-  String updateInterval = server.arg("updateInterval");
-  unsigned long updateInterval = updateIntervalStr.toInt();
+  String updateIntervalStr = server.arg("updateInterval");
+  unsigned long updateInterval = updateIntervalStr.toInt(); // Convert string to unsigned long
+
   if (isCheckboxChecked) {
-    // The checkbox is checked, get values frominput fields
+    // The checkbox is checked, get values from input fields
     String updateNtp1 = server.arg("updateNtp1");
     String updateNtp2 = server.arg("updateNtp2");
-    String updateInterval = server.arg ("updateInterval");
-    String intervalUnit = server.arg("intervalUnit");
+    unsigned long intervalUnit = server.arg("intervalUnit").toInt(); // Convert string to unsigned long
 
-    // Update NTP servers
+    // Update NTP servers and interval
     updateNtpServers(updateNtp1.c_str(), updateNtp2.c_str());
+    initConf.intervalUnit = intervalUnit;
+    
     server.send(200, "text/plain", "Settings and NTP servers updated. Please reboot the device.");
   } else {
     // The checkbox is not checked, send default content to the client
-    String defaultDateTime = getCurrentDateTime(); // Implement a function to get current date and time
+    String defaultDateTime = "<script>getCurrentDateTime()</script>"; 
     server.send(200, "text/plain", "Settings saved. Please reboot the device.|" + defaultDateTime);
   }
-    // Update configuration
+
+  // Update configuration
   strncpy(initConf.ssid, ssid.c_str(), sizeof(initConf.ssid));
   strncpy(initConf.password, password.c_str(), sizeof(initConf.password));
   strncpy(initConf.botToken, botToken.c_str(), sizeof(initConf.botToken));
   strncpy(initConf.chatId, chatId.c_str(), sizeof(initConf.chatId));
   strncpy(initConf.ntpServer1, ntpServer1.c_str(), sizeof(initConf.ntpServer1));
   strncpy(initConf.ntpServer2, ntpServer2.c_str(), sizeof(initConf.ntpServer2));
-  
+
   // Save configuration to file
   saveConfig(initConf);
-
 }
-
-void saveConfig(Configuration &config) {
-  File configFile = SPIFFS.open("/config.json", "w");
-  if (!configFile) {
-    Serial.println("Failed to open config file for writing");
-    return;
-  }
-
-  // Serialize configuration to JSON and write to file
-  serializeJson(config, configFile);
-  configFile.close();
-}
-
-void updateNtpServers(const char *ntpServer1, const char *ntpServer2) {
-  // Update NTP servers if provided
-  if (ntpServer1 && strlen(ntpServer1) > 0) {
-    // Update NTP server 1
-  }
-  if (ntpServer2 && strlen(ntpServer2) > 0) {
-    // Update NTP server 2
-  }
-}
-
 
 void setup() {
   Serial.begin(115200);
-   // Mount the file system
-   if (SPIFFS.begin()) {
+  // Mount the file system
+  if (SPIFFS.begin()) {
     Serial.println("File system mounted successfully");
-    return;
-  }else {
+  } else {
     Serial.println("An Error has occurred while mounting SPIFFS");
   }
   randomSeed(analogRead(0));
@@ -303,29 +304,4 @@ void loop() {
   }
 }
 
-void sendMessageToTelegram(const char *message) {
-  // Read the bot token and chat ID from the EEPROM
-  char botToken[32];
-  char chatId[32];
-  EEPROM.get(BOT_TOKEN_ADDRESS, botToken);
-  EEPROM.get(CHAT_ID_ADDRESS, chatId);
 
-  // Construct the URL
-  String url = "https://api.telegram.org/bot" + String(botToken) + "/sendMessage?chat_id=" + String(chatId) + "&text=" + String(message);
-
-  // Send the request
-  WiFiClient client;
-  HTTPClient http;
-  http.begin(client, url.c_str());
-  int httpCode = http.GET();
-
-  // Check the response code
-  if (httpCode > 0) {
-    Serial.println("Message sent successfully");
-  } else {
-    Serial.println("Error sending message");
-  }
-
-  // Close the connection
-  http.end();
-}
